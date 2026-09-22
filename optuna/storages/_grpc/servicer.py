@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from datetime import timezone
 import json
 import threading
 from typing import TYPE_CHECKING
@@ -29,7 +30,7 @@ else:
 
 
 _logger = logging.get_logger(__name__)
-DATETIME_FORMAT = "%Y-%m-%d %H:%M:%S.%f"
+DATETIME_FORMAT = "%Y-%m-%dT%H:%M:%S.%f%z"
 
 
 class OptunaStorageProxyService(api_pb2_grpc.StorageServiceServicer):
@@ -375,16 +376,28 @@ def _to_proto_trial(trial: FrozenTrial) -> api_pb2.Trial:
     for key, value in trial.params.items():
         params[key] = trial.distributions[key].to_internal_repr(value)
 
+    datetime_start = trial.datetime_start
+    if datetime_start is not None and datetime_start.tzinfo is None:
+        datetime_start = datetime_start.astimezone(timezone.utc)
+
+    datetime_complete = trial.datetime_complete
+    if datetime_complete is not None and datetime_complete.tzinfo is None:
+        datetime_complete = datetime_complete.astimezone(timezone.utc)
+
     return api_pb2.Trial(
         trial_id=trial._trial_id,
         number=trial.number,
         state=_to_proto_trial_state(trial.state),
         values=trial.values,
         datetime_start=(
-            trial.datetime_start.strftime(DATETIME_FORMAT) if trial.datetime_start else ""
+            datetime_start.astimezone(timezone.utc).strftime(DATETIME_FORMAT)
+            if datetime_start
+            else ""
         ),
         datetime_complete=(
-            trial.datetime_complete.strftime(DATETIME_FORMAT) if trial.datetime_complete else ""
+            datetime_complete.astimezone(timezone.utc).strftime(DATETIME_FORMAT)
+            if datetime_complete
+            else ""
         ),
         distributions={
             key: distribution_to_json(distribution)
@@ -398,14 +411,14 @@ def _to_proto_trial(trial: FrozenTrial) -> api_pb2.Trial:
 
 
 def _from_proto_trial(trial: api_pb2.Trial) -> FrozenTrial:
-    datetime_start = (
-        datetime.strptime(trial.datetime_start, DATETIME_FORMAT) if trial.datetime_start else None
-    )
-    datetime_complete = (
-        datetime.strptime(trial.datetime_complete, DATETIME_FORMAT)
-        if trial.datetime_complete
-        else None
-    )
+    def _parse_utc_datetime(s: str) -> datetime | None:
+        if not s:
+            return None
+        dt = datetime.strptime(s, DATETIME_FORMAT)
+        return dt.astimezone().replace(tzinfo=None)
+
+    datetime_start = _parse_utc_datetime(trial.datetime_start)
+    datetime_complete = _parse_utc_datetime(trial.datetime_complete)
     distributions = {
         key: json_to_distribution(value) for key, value in trial.distributions.items()
     }

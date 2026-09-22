@@ -126,3 +126,6 @@ dask-worker-space/
 
 # PyTorch Lightning
 lightning_logs/
+
+# OpenCode local config (contains API key)
+opencode.json
